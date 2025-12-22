@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: prxs-redis
+    restart: unless-stopped
+
+    # Port mapping (optional, for external access)
+    ports:
+      - "6379:6379"
+
+    # Volume for data persistence
+    volumes:
+      - redis-data:/data
+
+    # Redis configuration
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Network configuration
+    networks:
+      - prxs-network
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  registry:
+    build:
+      context: ../..
+      dockerfile: docker/registry/Dockerfile
+    container_name: prxs-registry
+    restart: unless-stopped
+
+    # Port mappings
+    ports:
+      # P2P ports (TCP and UDP)
+      - "4001:4001/tcp"
+      - "4001:4001/udp"
+      # REST API port
+      - "5001:5001/tcp"
+
+    # Environment variables
+    environment:
+      - PORT=4001
+      - KEY_FILE=/app/keys/registry.key
+      - DEV_MODE=true
+      - MIN_STAKE=10.0
+      - REDIS_ADDR=redis:6379
+
+    # Volume for persistent key storage
+    volumes:
+      - registry-keys:/app/keys
+      - registry-data:/app/data
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Resource limits (optional, adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+    # Network configuration
+    networks:
+      - prxs-network
+
+    # Dependencies
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5001/api/v1/services"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# Named volumes for data persistence
+volumes:
+  redis-data:
+    driver: local
+  registry-keys:
+    driver: local
+  registry-data:
+    driver: local
+
+# Network for PRXS services
+networks:
+  prxs-network:
+    driver: bridge
